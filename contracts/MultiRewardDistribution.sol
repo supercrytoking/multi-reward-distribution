@@ -464,6 +464,10 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
         return _rewards;
     }
 
+    function rewardTokenLength() external view returns (uint256) {
+        return rewardTokens.length;
+    }
+
     /* ========== MUTATIVE FUNCTIONS ========== */
 
     // Stake tokens to receive rewards
