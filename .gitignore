@@ -3,7 +3,8 @@ node_modules
 coverage
 coverage.json
 typechain
-
+soljson-v0.7.5+commit.eb77ed08.js
+.vscode
 #Hardhat files
 cache
 artifacts

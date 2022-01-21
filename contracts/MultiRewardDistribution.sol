@@ -179,9 +179,8 @@ interface IMultiRewardDistribution {
     function getRewardForDuration(address _rewardsToken) external returns (uint256);
     function stake(uint256 amount) external;
     function stakeFor(address recipient, uint256 amount) external;
-    function withdraw(uint256 amount) external;
+    function withdraw(uint256 amount, bool claimRewards) external;
     function getReward(address[] memory _rewardTokens) external;
-    function exit(bool claimRewards) external;
 }
 
 library LowGasSafeMath {
@@ -383,25 +382,22 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
         stakingToken = IERC20(_stakingToken);
     }
 
-    // Add a new reward token to be distributed to stakers
-    function addReward(address _rewardsToken) external override onlyOwner {
-        require(_rewardsToken != address(stakingToken), "ANA");
-        require(rewardData[_rewardsToken].lastUpdateTime == 0);
-        rewardTokens.push(_rewardsToken);
-        rewardData[_rewardsToken].lastUpdateTime = block.timestamp;
-        rewardData[_rewardsToken].periodFinish = block.timestamp;
+    
+    /* ========== INTERNAL ========== */
+    function _updateReward(address account) internal {
+        require(account != address(this) && account != address(0), "ANA");
+        uint256 balance = balances[account];
+        uint256 length = rewardTokens.length;
+        for (uint i = 0; i < length; i++) {
+            address token = rewardTokens[i];
+            Reward storage r = rewardData[token];
+            uint256 rpt = _rewardPerToken(token);
+            r.rewardPerTokenStored = rpt;
+            r.lastUpdateTime = lastTimeRewardApplicable(token);
+            rewards[account][token] = _earned(account, token, balance, rpt);
+            userRewardPerTokenPaid[account][token] = rpt;
+        }
     }
-
-    function removeReward(uint index) external onlyOwner {
-        address rewardToken = rewardTokens[index];
-        require(rewardToken != address(0), "ANA");
-        require(rewardData[rewardToken].lastUpdateTime != 0 && rewardData[rewardToken].rewardRate == 0, "TIW");
-        rewardTokens[index] = rewardTokens[rewardTokens.length-1];
-        rewardTokens.pop();
-        delete rewardData[rewardToken];
-    }
-
-    /* ========== VIEWS ========== */
 
     function _rewardPerToken(address _rewardsToken) internal view returns (uint256) {
         if (totalSupply == 0) {
@@ -426,6 +422,22 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
         ).div(1e18).add(rewards[_user][_rewardsToken]);
     }
 
+    function _getReward(address[] memory _rewardTokens, address recipient) internal {
+        uint256 length = _rewardTokens.length;
+        for (uint i; i < length; i++) {
+            address token = _rewardTokens[i];
+            uint256 reward = rewards[msg.sender][token].div(1e12);
+            Reward storage r = rewardData[token];
+            require(r.periodFinish > 0, "Unknown reward token");
+            
+            if (reward == 0) continue;
+            rewards[msg.sender][token] = 0;
+            IERC20(token).safeTransfer(recipient, reward);
+            emit RewardPaid(msg.sender, recipient, token, reward);
+        }
+    }
+
+    /* ========== VIEWS ========== */
     function lastTimeRewardApplicable(address _rewardsToken) public view returns (uint256) {
         uint periodFinish = rewardData[_rewardsToken].periodFinish;
         return block.timestamp < periodFinish ? block.timestamp : periodFinish;
@@ -472,29 +484,18 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
     // Withdraw staked tokens
     // First withdraws unlocked tokens, then earned tokens. Withdrawing earned tokens
     // incurs a 50% penalty which is distributed based on locked balances.
-    function withdraw(uint256 amount) external override {
+    function withdraw(uint256 amount, bool claimRewards) external override {
         require(amount > 0 && balances[msg.sender] >= amount, "AGB");
         _updateReward(msg.sender);
         totalSupply = totalSupply.sub(amount);
         balances[msg.sender] = balances[msg.sender].sub(amount);
         
         stakingToken.safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount);
-    }
-
-    function _getReward(address[] memory _rewardTokens, address recipient) internal {
-        uint256 length = _rewardTokens.length;
-        for (uint i; i < length; i++) {
-            address token = _rewardTokens[i];
-            uint256 reward = rewards[msg.sender][token].div(1e12);
-            Reward storage r = rewardData[token];
-            require(r.periodFinish > 0, "Unknown reward token");
-            
-            if (reward == 0) continue;
-            rewards[msg.sender][token] = 0;
-            IERC20(token).safeTransfer(recipient, reward);
-            emit RewardPaid(msg.sender, recipient, token, reward);
+        if (claimRewards) {
+            _getReward(rewardTokens, msg.sender);
         }
+
+        emit Withdrawn(msg.sender, amount);
     }
 
     // Claim all pending staking rewards
@@ -508,20 +509,25 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
         _getReward(_rewardTokens, recipient);
     }
 
-    // Withdraw full balance and optionally claim pending rewards
-    function exit(bool claimRewards) external override {
-        _updateReward(msg.sender);
-        uint amount = balances[msg.sender];
-        balances[msg.sender] = 0;
-        totalSupply = totalSupply.sub(amount);
-        stakingToken.safeTransfer(msg.sender, amount);
-        if (claimRewards) {
-            _getReward(rewardTokens, msg.sender);
-        }
-        emit Withdrawn(msg.sender, amount);
+    /* ========== RESTRICTED FUNCTIONS ========== */
+
+    // Add a new reward token to be distributed to stakers
+    function addReward(address _rewardsToken) external override onlyOwner {
+        require(_rewardsToken != address(stakingToken), "ANA");
+        require(rewardData[_rewardsToken].lastUpdateTime == 0);
+        rewardTokens.push(_rewardsToken);
+        rewardData[_rewardsToken].lastUpdateTime = block.timestamp;
+        rewardData[_rewardsToken].periodFinish = block.timestamp;
     }
 
-    /* ========== RESTRICTED FUNCTIONS ========== */
+    function removeReward(uint index) external onlyOwner {
+        address rewardToken = rewardTokens[index];
+        require(rewardToken != address(0), "ANA");
+        require(rewardData[rewardToken].lastUpdateTime != 0 && rewardData[rewardToken].rewardRate == 0, "TIW");
+        rewardTokens[index] = rewardTokens[rewardTokens.length-1];
+        rewardTokens.pop();
+        delete rewardData[rewardToken];
+    }
 
     function notifyReward(address _rewardsToken, uint256 reward) external onlyOwner {
         Reward storage r = rewardData[_rewardsToken];
@@ -556,21 +562,6 @@ contract MultiRewardDistribution is IMultiRewardDistribution, Ownable {
         require(rewardData[tokenAddress].rewardRate == 0, "Cannot withdraw reward token");
         IERC20(tokenAddress).safeTransfer(owner, tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
-    }
-
-    function _updateReward(address account) internal {
-        require(account != address(this) && account != address(0), "ANA");
-        uint256 balance = balances[account];
-        uint256 length = rewardTokens.length;
-        for (uint i = 0; i < length; i++) {
-            address token = rewardTokens[i];
-            Reward storage r = rewardData[token];
-            uint256 rpt = _rewardPerToken(token);
-            r.rewardPerTokenStored = rpt;
-            r.lastUpdateTime = lastTimeRewardApplicable(token);
-            rewards[account][token] = _earned(account, token, balance, rpt);
-            userRewardPerTokenPaid[account][token] = rpt;
-        }
     }
 
     /* ========== EVENTS ========== */
