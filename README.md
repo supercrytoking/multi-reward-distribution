@@ -7,17 +7,17 @@ This repository contains the MultiRewardDistribution.
 ## Testing
 
 ```sh
-$ npm install
+$ yarn
 ```
 
 Compile hardhat components:
 
 ```sh
-$ npm run compile
+$ yarn compile
 ```
 
 Run tests:
 
 ```sh
-$ npm run test
+$ yarn test
 ```
