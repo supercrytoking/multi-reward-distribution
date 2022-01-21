@@ -49,9 +49,5 @@ module.exports = {
   typechain: {
     target: 'ethers-v5',
     alwaysGenerateOverloads: false,
-    externalArtifacts: [
-      'node_modules/@uniswap/v3-core/artifacts/contracts/*/*.json',
-      'node_modules/@uniswap/v3-periphery/artifacts/contracts/*/*.json'
-    ]
   }
 };

@@ -5,32 +5,35 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { getBigNumber } from "../utils";
 import { constants } from "ethers";
 
-const WMEMO_ADDRESS = "0x0da67235dD5787D67955420C84ca1cEcd4E5Bb3b";
-
 describe("MultiRewardDistribution", function() {
     let MultiRewardDistribution: MultiRewardDistribution;
     let deployer: SignerWithAddress;
     let alice: SignerWithAddress;
+    let bob: SignerWithAddress;
     let Token: WrapERC20;
+    let StakingToken: WrapERC20;
     let snapshotId: string;
     const tokenAmount = getBigNumber(10_000);
     const rewardsDuration = 86400 * 7;
     
     before(async () =>{
-        [deployer, alice] = await ethers.getSigners();
-
-        // deploy MultiRewardDistribution
-        const contractFactory = await ethers.getContractFactory("MultiRewardDistribution");
-        MultiRewardDistribution = (await contractFactory.deploy(WMEMO_ADDRESS)) as MultiRewardDistribution;
+        [deployer, alice, bob] = await ethers.getSigners();
 
         // deploy some tokens
         const tokenFactory = await ethers.getContractFactory("WrapERC20");
-        Token = (await tokenFactory.deploy("Token 1", "T1")) as WrapERC20;
+        Token = (await tokenFactory.deploy("Token", "T")) as WrapERC20;
+        StakingToken = (await tokenFactory.deploy("Staking Token", "ST")) as WrapERC20;
+
+        // deploy MultiRewardDistribution
+        const contractFactory = await ethers.getContractFactory("MultiRewardDistribution");
+        MultiRewardDistribution = (await contractFactory.deploy(StakingToken.address)) as MultiRewardDistribution;
         
         // mint some mim
         await Token.mint(deployer.address, tokenAmount);
+        await StakingToken.mint(alice.address, tokenAmount);
 
         await Token.approve(MultiRewardDistribution.address, constants.MaxUint256);
+        await StakingToken.connect(alice).approve(MultiRewardDistribution.address, constants.MaxUint256);
 
         snapshotId = await ethers.provider.send("evm_snapshot", []);
     });
@@ -56,7 +59,7 @@ describe("MultiRewardDistribution", function() {
         });
 
         it("should check for staking token", async function () {
-            const action = MultiRewardDistribution.addReward(WMEMO_ADDRESS);
+            const action = MultiRewardDistribution.addReward(StakingToken.address);
             await expect(action).to.revertedWith('ANA');
         });
     });
@@ -143,7 +146,7 @@ describe("MultiRewardDistribution", function() {
             const blockTime = (await ethers.provider.getBlock(currentBlock)).timestamp;
 
             expect(beforeOwnerBalance).to.be.equal(tokenAmount);
-            expect(afterOwnerBalance).to.be.equal(0);
+            expect(afterOwnerBalance).to.be.equal(beforeOwnerBalance.sub(tokenAmount));
             expect(afterOwnerBalance).not.be.equal(beforeOwnerBalance);
             expect(rewardPerTokenStored).to.be.equal(0);
             expect(lastUpdateTime).to.be.equal(blockTime);
@@ -212,7 +215,7 @@ describe("MultiRewardDistribution", function() {
         });
 
         it("should check staking address", async function () {
-            const action = MultiRewardDistribution.recoverERC20(WMEMO_ADDRESS, 10);
+            const action = MultiRewardDistribution.recoverERC20(StakingToken.address, 10);
             await expect(action).to.revertedWith('Cannot withdraw staking token');
         });
 
@@ -225,5 +228,85 @@ describe("MultiRewardDistribution", function() {
             const action = MultiRewardDistribution.connect(alice).recoverERC20(Token.address, 10);
             await expect(action).to.revertedWith('Ownable: caller is not the owner');
         });
-    })
+    });
+
+    describe("stake", () => {
+        it("should emit Staked", async () => {
+            const action = MultiRewardDistribution.connect(alice).stake(tokenAmount);
+            await expect(action).to.emit(MultiRewardDistribution, "Staked").withArgs(alice.address, alice.address, tokenAmount);
+        });
+
+        it("should check 0 amount", async () => {
+            const action = MultiRewardDistribution.connect(alice).stake(0);
+            await expect(action).to.revertedWith('Cannot stake 0');
+        });
+
+        it("should stake", async () => {
+            const beforeTotalSupply = await MultiRewardDistribution.totalSupply();
+            const beforeAliceStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const beforeContractBalance = await StakingToken.balanceOf(MultiRewardDistribution.address);
+            await MultiRewardDistribution.connect(alice).stake(tokenAmount);
+            const afterTotalSupply = await MultiRewardDistribution.totalSupply();
+            const afterAliceStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const afterContractBalance = await StakingToken.balanceOf(MultiRewardDistribution.address);
+
+            expect(beforeTotalSupply).to.be.equal(0);
+            expect(afterTotalSupply).to.be.equal(beforeTotalSupply.add(tokenAmount));
+            expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
+
+            expect(beforeAliceStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(afterAliceStakingTokenBalance).to.be.equal(beforeAliceStakingTokenBalance.sub(tokenAmount));
+            expect(afterAliceStakingTokenBalance).not.be.equal(beforeAliceStakingTokenBalance);
+
+            expect(beforeContractBalance).to.be.equal(0);
+            expect(afterContractBalance).to.be.equal(beforeContractBalance.add(tokenAmount));
+            expect(afterContractBalance).not.be.equal(beforeContractBalance);
+
+            const balance = await MultiRewardDistribution.balances(alice.address);
+            expect(balance).to.be.equal(tokenAmount);
+        });
+    });
+
+    describe("stakeFor", () => {
+        it("should emit Staked", async () => {
+            const action = MultiRewardDistribution.connect(alice).stakeFor(bob.address, tokenAmount);
+            await expect(action).to.emit(MultiRewardDistribution, "Staked").withArgs(alice.address, bob.address, tokenAmount);
+        });
+
+        it("should check 0 amount", async () => {
+            const action = MultiRewardDistribution.connect(alice).stakeFor(bob.address, 0);
+            await expect(action).to.revertedWith('Cannot stake 0');
+        });
+
+        it("should stake", async () => {
+            const beforeTotalSupply = await MultiRewardDistribution.totalSupply();
+            const beforeAliceStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const beforeContractBalance = await StakingToken.balanceOf(MultiRewardDistribution.address);
+            await MultiRewardDistribution.connect(alice).stakeFor(bob.address, tokenAmount);
+            const afterTotalSupply = await MultiRewardDistribution.totalSupply();
+            const afterAliceStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const afterContractBalance = await StakingToken.balanceOf(MultiRewardDistribution.address);
+
+            expect(beforeTotalSupply).to.be.equal(0);
+            expect(afterTotalSupply).to.be.equal(beforeTotalSupply.add(tokenAmount));
+            expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
+
+            expect(beforeAliceStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(afterAliceStakingTokenBalance).to.be.equal(beforeAliceStakingTokenBalance.sub(tokenAmount));
+            expect(afterAliceStakingTokenBalance).not.be.equal(beforeAliceStakingTokenBalance);
+
+            expect(beforeContractBalance).to.be.equal(0);
+            expect(afterContractBalance).to.be.equal(beforeContractBalance.add(tokenAmount));
+            expect(afterContractBalance).not.be.equal(beforeContractBalance);
+
+            const balanceBobe = await MultiRewardDistribution.balances(bob.address);
+            expect(balanceBobe).to.be.equal(tokenAmount);
+            const balanceAlice = await MultiRewardDistribution.balances(alice.address);
+            expect(balanceAlice).to.be.equal(0);
+        });
+    });
+
+    describe("withdraw", () => {});
+    describe("getReward", () => {});
+    describe("getRewardFor", () => {});
 });
