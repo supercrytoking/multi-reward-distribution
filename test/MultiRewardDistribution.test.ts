@@ -97,28 +97,6 @@ describe("MultiRewardDistribution", function() {
         });
     });
 
-    describe("rewardPerToken", () => {
-        beforeEach("added token", async () => {
-            await MultiRewardDistribution.addReward(Token.address);
-        });
-
-        it("should return reward per token", async () => {
-            const rewardPerToken = await MultiRewardDistribution.rewardPerToken(Token.address);
-            expect(rewardPerToken).to.be.equal(0);
-        });
-    });
-
-    describe("getRewardForDuration", () => {
-        beforeEach("added token", async () => {
-            await MultiRewardDistribution.addReward(Token.address);
-        });
-
-        it("should return reward for duration", async () => {
-            const rewardPerToken = await MultiRewardDistribution.getRewardForDuration(Token.address);
-            expect(rewardPerToken).to.be.equal(0);
-        });
-    });
-
     describe("rewardTokenLength", () => {
         it("should return reward token length (0)", async () => {
             const rewardTokenLength = await MultiRewardDistribution.rewardTokenLength();
