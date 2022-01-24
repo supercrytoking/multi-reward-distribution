@@ -306,7 +306,208 @@ describe("MultiRewardDistribution", function() {
         });
     });
 
-    describe("withdraw", () => {});
-    describe("getReward", () => {});
-    describe("getRewardFor", () => {});
+    describe("withdraw", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        beforeEach("stake token", async () => {
+            await MultiRewardDistribution.connect(alice).stake(tokenAmount);
+        });
+
+        it("should check 0 amount", async () => {
+            const action = MultiRewardDistribution.connect(alice).withdraw(0, false);
+            await expect(action).to.revertedWith('AGB');
+        });
+
+        it("should emit Withdrawn", async () => {
+            const action = MultiRewardDistribution.connect(alice).withdraw(tokenAmount, false);
+            await expect(action).to.emit(MultiRewardDistribution, "Withdrawn").withArgs(alice.address, tokenAmount);
+        });
+
+        it("should emit RewardPaid", async () => {
+            const action = MultiRewardDistribution.connect(alice).withdraw(tokenAmount, true);
+            await expect(action).to.emit(MultiRewardDistribution, "RewardPaid").withArgs(alice.address, alice.address, Token.address, "16534391534391534");
+        });
+
+        it("should return staking token without claim rewards", async () => {
+            const beforeTotalSupply = await MultiRewardDistribution.totalSupply();
+            const beforeStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const beforeBalance = await MultiRewardDistribution.balances(alice.address);
+            await MultiRewardDistribution.connect(alice).withdraw(tokenAmount, false);
+            const afterTotalSupply = await MultiRewardDistribution.totalSupply();
+            const afterStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const afterBalance = await MultiRewardDistribution.balances(alice.address);
+
+            expect(beforeTotalSupply).to.be.equal(tokenAmount);
+            expect(afterTotalSupply).to.be.equal(0);
+            expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
+
+            expect(beforeStakingTokenBalance).to.be.equal(0);
+            expect(afterStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(afterStakingTokenBalance).not.be.equal(beforeStakingTokenBalance);
+
+            expect(beforeBalance).to.be.equal(tokenAmount);
+            expect(afterBalance).to.be.equal(0);
+            expect(afterBalance).not.be.equal(beforeBalance);
+        });
+
+        it("should return staking token with claim rewards", async () => {
+            const beforeTotalSupply = await MultiRewardDistribution.totalSupply();
+            const beforeStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const beforeBalance = await MultiRewardDistribution.balances(alice.address);
+            const beforeRewardTokenBalance = await Token.balanceOf(alice.address);
+            const userRewardPerTokenPaid = await MultiRewardDistribution.userRewardPerTokenPaid(alice.address, Token.address);
+
+            await MultiRewardDistribution.connect(alice).withdraw(tokenAmount, true);
+
+            const afterTotalSupply = await MultiRewardDistribution.totalSupply();
+            const afterStakingTokenBalance = await StakingToken.balanceOf(alice.address);
+            const afterBalance = await MultiRewardDistribution.balances(alice.address);
+            const afterRewardTokenBalance = await Token.balanceOf(alice.address);
+
+            const { rewardPerTokenStored } = await MultiRewardDistribution.rewardData(Token.address);
+            const rewardAmount = tokenAmount.mul(rewardPerTokenStored.sub(userRewardPerTokenPaid)).div(getBigNumber(1));
+
+            expect(beforeTotalSupply).to.be.equal(tokenAmount);
+            expect(afterTotalSupply).to.be.equal(0);
+            expect(afterTotalSupply).not.be.equal(beforeTotalSupply);
+
+            expect(beforeStakingTokenBalance).to.be.equal(0);
+            expect(afterStakingTokenBalance).to.be.equal(tokenAmount);
+            expect(afterStakingTokenBalance).not.be.equal(beforeStakingTokenBalance);
+
+            expect(beforeBalance).to.be.equal(tokenAmount);
+            expect(afterBalance).to.be.equal(0);
+            expect(afterBalance).not.be.equal(beforeBalance);
+
+            expect(beforeRewardTokenBalance).to.be.equal(0);
+            expect(afterRewardTokenBalance).to.be.equal(rewardAmount.div("1000000000000"));
+            expect(afterRewardTokenBalance).not.be.equal(beforeRewardTokenBalance);
+        });
+    });
+
+    describe("getReward", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        beforeEach("stake token", async () => {
+            await MultiRewardDistribution.connect(alice).stake(tokenAmount);
+        });
+
+        it("should emit RewardPaid", async () => {
+            const action = MultiRewardDistribution.connect(alice).getReward([Token.address]);
+            await expect(action).to.emit(MultiRewardDistribution, "RewardPaid").withArgs(alice.address, alice.address, Token.address, "16534391534391534");
+        });
+
+        it("should return rewards", async () => {
+            const beforeRewardTokenBalance = await Token.balanceOf(alice.address);
+            const userRewardPerTokenPaid = await MultiRewardDistribution.userRewardPerTokenPaid(alice.address, Token.address);
+
+            await MultiRewardDistribution.connect(alice).getReward([Token.address]);
+
+            const afterRewardTokenBalance = await Token.balanceOf(alice.address);
+
+            const { rewardPerTokenStored } = await MultiRewardDistribution.rewardData(Token.address);
+            const rewardAmount = tokenAmount.mul(rewardPerTokenStored.sub(userRewardPerTokenPaid)).div(getBigNumber(1));
+
+            expect(beforeRewardTokenBalance).to.be.equal(0);
+            expect(afterRewardTokenBalance).to.be.equal(rewardAmount.div("1000000000000"));
+            expect(afterRewardTokenBalance).not.be.equal(beforeRewardTokenBalance);
+        });
+    });
+
+    describe("getRewardFor", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        beforeEach("stake token", async () => {
+            await MultiRewardDistribution.connect(alice).stake(tokenAmount);
+        });
+
+        it("should emit RewardPaid", async () => {
+            const action = MultiRewardDistribution.connect(alice).getRewardFor([Token.address], bob.address);
+            await expect(action).to.emit(MultiRewardDistribution, "RewardPaid").withArgs(alice.address, bob.address, Token.address, "16534391534391534");
+        });
+
+        it("should return rewards", async () => {
+            const beforeRewardTokenBalance = await Token.balanceOf(bob.address);
+            const userRewardPerTokenPaid = await MultiRewardDistribution.userRewardPerTokenPaid(alice.address, Token.address);
+
+            await MultiRewardDistribution.connect(alice).getRewardFor([Token.address], bob.address);
+
+            const afterRewardTokenBalance = await Token.balanceOf(bob.address);
+
+            const { rewardPerTokenStored } = await MultiRewardDistribution.rewardData(Token.address);
+            const rewardAmount = tokenAmount.mul(rewardPerTokenStored.sub(userRewardPerTokenPaid)).div(getBigNumber(1));
+
+            expect(beforeRewardTokenBalance).to.be.equal(0);
+            expect(afterRewardTokenBalance).to.be.equal(rewardAmount.div("1000000000000"));
+            expect(afterRewardTokenBalance).not.be.equal(beforeRewardTokenBalance);
+        });
+    });
+
+    describe("rewardPerToken", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        it("shoild return rewardPerToken", async () => {
+            const { rewardPerTokenStored } = await MultiRewardDistribution.rewardData(Token.address);
+            const rewardPerToken = await MultiRewardDistribution.rewardPerToken(Token.address);
+            expect(rewardPerToken).to.be.equal(rewardPerTokenStored);
+        });
+    });
+
+    describe("getRewardForDuration", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        it("shoild return rewardPerToken", async () => {
+            const { rewardRate } = await MultiRewardDistribution.rewardData(Token.address);
+            const rfd = rewardRate.mul(rewardsDuration).div("1000000000000");
+            const getRewardForDuration = await MultiRewardDistribution.getRewardForDuration(Token.address);
+            expect(getRewardForDuration).to.be.equal(rfd);
+        });
+    });
+
+    describe("claimableRewards", () => {
+        beforeEach("added token", async () => {
+            await MultiRewardDistribution.addReward(Token.address);
+        });
+
+        beforeEach("added rewards", async () => {
+            await MultiRewardDistribution.notifyReward(Token.address, tokenAmount);
+        });
+
+        it('should return rewards list', async () => {
+            const claimableRewards = await MultiRewardDistribution.claimableRewards(alice.address);
+            const { token, amount } = claimableRewards[0];
+            expect(token).to.be.equal(Token.address);
+            expect(amount).to.be.equal(getBigNumber(0));
+        });
+    });
 });
